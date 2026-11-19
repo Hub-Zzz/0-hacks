@@ -1,0 +1,424 @@
+--[[ Venice Hub | Murder Mystery 2
+     RightShift = abrir / cerrar
+     AutoShoot apunta y dispara solo, sin cursor ]]
+
+if game.CoreGui:FindFirstChild("VeniceHub") then game.CoreGui.VeniceHub:Destroy() end
+
+local Players    = game:GetService("Players")
+local RS         = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local UIS        = game:GetService("UserInputService")
+local Lighting   = game:GetService("Lighting")
+
+local LP  = Players.LocalPlayer
+local Cam = workspace.CurrentCamera
+
+local cfg = { autoShoot = false, esp = false, names = true, fullbright = false, range = 300, delay = 0.45 }
+
+--==================== ROLES ====================--
+local function nameHas(s, k) return s:lower():find(k, 1, true) ~= nil end
+
+local function getRole(plr)
+	if plr == LP then return "You" end
+	local ok, attr = pcall(function() return plr:GetAttribute("Role") end)
+	if ok and typeof(attr) == "string" and #attr > 0 then
+		if nameHas(attr, "murder") or nameHas(attr, "asesino") then return "Murderer" end
+		if nameHas(attr, "sheriff") then return "Sheriff" end
+		if nameHas(attr, "innocent") then return "Innocent" end
+	end
+	local rf = RS:FindFirstChild("Roles")
+	if rf then
+		local v = rf:FindFirstChild(plr.Name)
+		if v and typeof(v.Value) == "string" then
+			if nameHas(v.Value, "murder") then return "Murderer" end
+			if nameHas(v.Value, "sheriff") then return "Sheriff" end
+		end
+	end
+	local char = plr.Character
+	if char then
+		for _, c in ipairs(char:GetChildren()) do
+			if c:IsA("Tool") then
+				if nameHas(c.Name, "knife") or nameHas(c.Name, "cuchillo") then return "Murderer" end
+				if nameHas(c.Name, "gun") or nameHas(c.Name, "pistol") then return "Sheriff" end
+			end
+		end
+	end
+	local bp = plr:FindFirstChildOfClass("Backpack")
+	if bp then
+		for _, t in ipairs(bp:GetChildren()) do
+			if t:IsA("Tool") then
+				if nameHas(t.Name, "knife") or nameHas(t.Name, "cuchillo") then return "Murderer" end
+				if nameHas(t.Name, "gun") or nameHas(t.Name, "pistol") then return "Sheriff" end
+			end
+		end
+	end
+	return "Innocent"
+end
+
+local function roleColor(r)
+	if r == "Murderer" then return Color3.fromRGB(255, 70, 70) end
+	if r == "Sheriff" then return Color3.fromRGB(70, 160, 255) end
+	return Color3.fromRGB(120, 255, 140)
+end
+
+--==================== GUI ====================--
+local gui = Instance.new("ScreenGui")
+gui.Name = "VeniceHub"
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.Parent = game.CoreGui
+
+local main = Instance.new("Frame")
+main.Size = UDim2.fromOffset(232, 352)
+main.Position = UDim2.new(0, 50, 0.5, -176)
+main.BackgroundColor3 = Color3.fromRGB(17, 17, 21)
+main.BorderSizePixel = 0
+main.Parent = gui
+Instance.new("UICorner", main).CornerRadius = UDim.new(0, 10)
+local st = Instance.new("UIStroke", main)
+st.Color = Color3.fromRGB(60, 60, 75)
+
+local bar = Instance.new("Frame")
+bar.Size = UDim2.new(1, 0, 0, 34)
+bar.BackgroundTransparency = 1
+bar.Parent = main
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -50, 1, 0)
+title.Position = UDim2.fromOffset(12, 0)
+title.BackgroundTransparency = 1
+title.Text = "VENICE HUB"
+title.Font = Enum.Font.GothamBold
+title.TextSize = 14
+title.TextColor3 = Color3.fromRGB(235, 235, 245)
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = bar
+
+local min = Instance.new("TextButton")
+min.Size = UDim2.fromOffset(24, 24)
+min.Position = UDim2.new(1, -32, 0, 5)
+min.BackgroundColor3 = Color3.fromRGB(40, 40, 48)
+min.Text = "–"
+min.TextColor3 = Color3.fromRGB(230, 230, 240)
+min.Font = Enum.Font.GothamBold
+min.TextSize = 15
+min.BorderSizePixel = 0
+min.Parent = bar
+Instance.new("UICorner", min).CornerRadius = UDim.new(0, 6)
+
+local open = Instance.new("TextButton")
+open.Size = UDim2.fromOffset(38, 38)
+open.Position = main.Position
+open.BackgroundColor3 = Color3.fromRGB(17, 17, 21)
+open.Text = "V"
+open.TextColor3 = Color3.fromRGB(235, 235, 245)
+open.Font = Enum.Font.GothamBold
+open.TextSize = 16
+open.Visible = false
+open.BorderSizePixel = 0
+open.Parent = gui
+Instance.new("UICorner", open).CornerRadius = UDim.new(0, 8)
+
+local function setOpen(state)
+	main.Visible = state
+	open.Visible = not state
+end
+
+-- arrastre
+local dragging, dragStart, startPos
+bar.InputBegan:Connect(function(i)
+	if i.UserInputType == Enum.UserInputType.MouseButton1 then
+		dragging = true
+		dragStart = i.Position
+		startPos = main.Position
+	end
+end)
+UIS.InputChanged:Connect(function(i)
+	if dragging and i.UserInputType == Enum.UserInputType.MouseMovement then
+		local d = i.Position - dragStart
+		main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+	end
+end)
+UIS.InputEnded:Connect(function(i)
+	if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
+end)
+
+--==================== TOGGLES ====================--
+local yPos = 42
+local function addToggle(label, key, onChange)
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.new(1, -20, 0, 28)
+	btn.Position = UDim2.fromOffset(10, yPos)
+	btn.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
+	btn.AutoButtonColor = false
+	btn.Text = ""
+	btn.BorderSizePixel = 0
+	btn.Parent = main
+	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+
+	local txt = Instance.new("TextLabel")
+	txt.Size = UDim2.new(1, -34, 1, 0)
+	txt.Position = UDim2.fromOffset(10, 0)
+	txt.BackgroundTransparency = 1
+	txt.Text = label
+	txt.Font = Enum.Font.GothamMedium
+	txt.TextSize = 13
+	txt.TextColor3 = Color3.fromRGB(150, 150, 165)
+	txt.TextXAlignment = Enum.TextXAlignment.Left
+	txt.Parent = btn
+
+	local dot = Instance.new("Frame")
+	dot.Size = UDim2.fromOffset(10, 10)
+	dot.Position = UDim2.new(1, -22, 0.5, -5)
+	dot.BackgroundColor3 = Color3.fromRGB(70, 70, 80)
+	dot.BorderSizePixel = 0
+	dot.Parent = btn
+	Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
+
+	btn.MouseButton1Click:Connect(function()
+		cfg[key] = not cfg[key]
+		dot.BackgroundColor3 = cfg[key] and Color3.fromRGB(90, 220, 130) or Color3.fromRGB(70, 70, 80)
+		txt.TextColor3 = cfg[key] and Color3.fromRGB(235, 235, 245) or Color3.fromRGB(150, 150, 165)
+		if onChange then onChange(cfg[key]) end
+	end)
+
+	yPos += 33
+	return btn
+end
+
+--==================== ESP ====================--
+local espFolder = Instance.new("Folder")
+espFolder.Name = "ESP"
+espFolder.Parent = gui
+
+local function clearESP()
+	for _, c in ipairs(espFolder:GetChildren()) do c:Destroy() end
+end
+
+local function buildESP(plr)
+	local char = plr.Character
+	local head = char and (char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart"))
+	if not head then return end
+	local r   = getRole(plr)
+	local col = roleColor(r)
+
+	local hl = espFolder:FindFirstChild(plr.Name .. "_HL")
+	if not hl then
+		hl = Instance.new("Highlight")
+		hl.Name = plr.Name .. "_HL"
+		hl.FillTransparency = 0.65
+		hl.OutlineSize = 1.5
+		hl.Parent = espFolder
+	end
+	hl.Adornee = char
+	hl.FillColor = col
+	hl.OutlineColor = col
+
+	local bb = espFolder:FindFirstChild(plr.Name .. "_BB")
+	if not bb then
+		bb = Instance.new("BillboardGui")
+		bb.Name = plr.Name .. "_BB"
+		bb.Size = UDim2.fromOffset(180, 36)
+		bb.StudsOffset = Vector3.new(0, 2.6, 0)
+		bb.AlwaysOnTop = true
+		bb.MaxDistance = 800
+		bb.Parent = espFolder
+		local lbl = Instance.new("TextLabel")
+		lbl.Size = UDim2.fromScale(1, 1)
+		lbl.BackgroundTransparency = 1
+		lbl.Font = Enum.Font.GothamBold
+		lbl.TextSize = 12
+		lbl.TextStrokeTransparency = 0.4
+		lbl.Parent = bb
+	end
+	bb.Adornee = head
+	local lbl = bb:FindFirstChildOfClass("TextLabel")
+	if lbl then
+		lbl.TextColor3 = col
+		lbl.Text = (cfg.names and (plr.Name .. "  ") or "") .. "[" .. r .. "]"
+	end
+end
+
+task.spawn(function()
+	while true do
+		if cfg.esp then
+			for _, p in ipairs(Players:GetPlayers()) do
+				if p ~= LP and p.Character then buildESP(p) end
+			end
+		end
+		task.wait(0.35)
+	end
+end)
+
+Players.PlayerRemoving:Connect(function(p)
+	local a = espFolder:FindFirstChild(p.Name .. "_HL")
+	local b = espFolder:FindFirstChild(p.Name .. "_BB")
+	if a then a:Destroy() end
+	if b then b:Destroy() end
+end)
+
+--==================== FULLBRIGHT ====================--
+local oldLight
+local function setFullbright(on)
+	if on then
+		oldLight = { Lighting.Brightness, Lighting.Ambient, Lighting.OutdoorAmbient, Lighting.FogEnd }
+		Lighting.Brightness = 3
+		Lighting.Ambient = Color3.fromRGB(180, 180, 180)
+		Lighting.OutdoorAmbient = Color3.fromRGB(180, 180, 180)
+		Lighting.FogEnd = 100000
+	elseif oldLight then
+		Lighting.Brightness = oldLight[1]
+		Lighting.Ambient = oldLight[2]
+		Lighting.OutdoorAmbient = oldLight[3]
+		Lighting.FogEnd = oldLight[4]
+	end
+end
+
+--==================== AUTOSHOOT ====================--
+local aimTarget
+
+local function getGun()
+	local char = LP.Character
+	if not char then return nil end
+	for _, t in ipairs(char:GetChildren()) do
+		if t:IsA("Tool") and nameHas(t.Name, "gun") then return t end
+	end
+	local bp = LP:FindFirstChildOfClass("Backpack")
+	if bp then
+		for _, t in ipairs(bp:GetChildren()) do
+			if t:IsA("Tool") and nameHas(t.Name, "gun") then return t end
+		end
+	end
+	return nil
+end
+
+local function findMurderer()
+	local cam = workspace.CurrentCamera
+	if not cam then return nil end
+	local best, bestD
+	for _, p in ipairs(Players:GetPlayers()) do
+		local char = p.Character
+		local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+		local hum  = char and char:FindFirstChildOfClass("Humanoid")
+		if hrp and hum and hum.Health > 0 and getRole(p) == "Murderer" then
+			local d = (hrp.Position - cam.CFrame.Position).Magnitude
+			if d <= cfg.range and (not bestD or d < bestD) then best, bestD = p, d end
+		end
+	end
+	return best
+end
+
+local function hasLOS(char)
+	local cam = workspace.CurrentCamera
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if not cam or not hrp then return false end
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { char, LP.Character }
+	local res = workspace:Raycast(cam.CFrame.Position, hrp.Position - cam.CFrame.Position, params)
+	return res == nil
+end
+
+local aimConn = RunService:BindToRenderStep("VeniceAim", Enum.RenderPriority.Camera.Value + 1, function()
+	if not cfg.autoShoot or not aimTarget then return end
+	local char = aimTarget.Character
+	local tgt  = char and (char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart"))
+	local cam  = workspace.CurrentCamera
+	if not tgt or not cam then return end
+	cam.CFrame = CFrame.lookAt(cam.CFrame.Position, tgt.Position)
+end)
+
+task.spawn(function()
+	while true do
+		if cfg.autoShoot then
+			pcall(function()
+				UIS.MouseIconEnabled = false
+				UIS.MouseBehavior = Enum.MouseBehavior.LockCenter
+
+				local char = LP.Character
+				local hum  = char and char:FindFirstChildOfClass("Humanoid")
+				local gun  = getGun()
+				local mur  = findMurderer()
+
+				if gun and mur and char and hum and hum.Health > 0 then
+					if gun.Parent ~= char then
+						hum:EquipTool(gun)
+						task.wait(0.13)
+					end
+					if gun.Parent == char then
+						aimTarget = mur
+						if hasLOS(mur.Character) then
+							gun:Activate()
+							task.wait(0.05)
+						end
+					end
+				else
+					aimTarget = nil
+				end
+			end)
+		else
+			aimTarget = nil
+			UIS.MouseIconEnabled = true
+			UIS.MouseBehavior = Enum.MouseBehavior.Default
+		end
+		task.wait(cfg.delay)
+	end
+end)
+
+--==================== CONTROLES ====================--
+addToggle("Auto Shoot", "autoShoot")
+addToggle("ESP Roles", "esp", function(on)
+	if not on then clearESP() end
+end)
+addToggle("ESP Nombres", "names")
+addToggle("Fullbright", "fullbright", setFullbright)
+
+local rangeBox = Instance.new("TextBox")
+rangeBox.Size = UDim2.new(1, -20, 0, 26)
+rangeBox.Position = UDim2.fromOffset(10, yPos + 4)
+rangeBox.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
+rangeBox.BorderSizePixel = 0
+rangeBox.Text = tostring(cfg.range)
+rangeBox.Font = Enum.Font.GothamMedium
+rangeBox.TextSize = 12
+rangeBox.TextColor3 = Color3.fromRGB(200, 200, 215)
+rangeBox.PlaceholderText = "Rango de disparo"
+rangeBox.Parent = main
+Instance.new("UICorner", rangeBox).CornerRadius = UDim.new(0, 6)
+rangeBox.FocusLost:Connect(function()
+	local n = tonumber(rangeBox.Text)
+	cfg.range = n and math.clamp(n, 20, 2000) or 300
+	rangeBox.Text = tostring(cfg.range)
+end)
+
+local unload = Instance.new("TextButton")
+unload.Size = UDim2.new(1, -20, 0, 26)
+unload.Position = UDim2.fromOffset(10, yPos + 36)
+unload.BackgroundColor3 = Color3.fromRGB(45, 30, 35)
+unload.BorderSizePixel = 0
+unload.Text = "Unload"
+unload.Font = Enum.Font.GothamBold
+unload.TextSize = 12
+unload.TextColor3 = Color3.fromRGB(255, 140, 140)
+unload.Parent = main
+Instance.new("UICorner", unload).CornerRadius = UDim.new(0, 6)
+
+local function unloadAll()
+	pcall(function() RunService:UnbindFromRenderStep("VeniceAim") end)
+	UIS.MouseIconEnabled = true
+	UIS.MouseBehavior = Enum.MouseBehavior.Default
+	if oldLight then setFullbright(false) end
+	clearESP()
+	gui:Destroy()
+end
+
+unload.MouseButton1Click:Connect(unloadAll)
+
+min.MouseButton1Click:Connect(function() setOpen(false) end)
+open.MouseButton1Click:Connect(function() setOpen(true) end)
+UIS.InputBegan:Connect(function(i, gp)
+	if gp then return end
+	if i.KeyCode == Enum.KeyCode.RightShift then
+		if main.Visible then setOpen(false) else setOpen(true) end
+	end
+end)
